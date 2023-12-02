@@ -1,13 +1,14 @@
 #!/usr/bin/env runghc
 
-import Debug.Trace
+import Help.Parsers
+
 import Data.Functor
 import Data.Maybe
 import Text.Parsec
 import Text.Parsec.String
+import Numeric.Natural
 
-dbg :: Show a => a -> a
-dbg a = trace (show a) a
+{--- TYPES ---}
 
 data Colour
   = Red
@@ -15,83 +16,89 @@ data Colour
   | Blue
   deriving Eq
 
-data PulledCubes = PulledCubes
-  { red :: Integer
-  , green :: Integer
-  , blue :: Integer
+type Count = Natural
+
+data CubeCounts = CubeCounts
+  { red :: Count
+  , green :: Count
+  , blue :: Count
   }
-  deriving Show
 
 data Game = Game
-  { gameId :: Integer
-  , pulls :: [PulledCubes]
+  { gameId :: Natural
+  , pulls :: [CubeCounts]
   }
-  deriving Show
 
-integer :: Parser Integer
-integer = read <$> many1 digit
-
-parseColourCount :: Parser (Colour, Integer)
+{--- PARSERS ---}
+parseColourCount :: Parser (Colour, Count)
 parseColourCount = do
   let red = string' "red" $> Red
       green = string' "green" $> Green
       blue = string' "blue" $> Blue
 
-  count <- integer
+  count <- natural
   spaces
   colour <- red <|> green <|> blue
   pure (colour, count)
 
-parsePull :: Parser PulledCubes
+parsePull :: Parser CubeCounts
 parsePull = do
   colourCounts <- parseColourCount `sepBy` string' ", "
-  let f = fromMaybe 0 . flip lookup colourCounts
-      [red, green, blue] = f <$> [Red, Green, Blue]
-  pure $ PulledCubes {red, green, blue}
+  let countOf colour = fromMaybe 0 $ lookup colour colourCounts
+  pure $
+    CubeCounts
+      { red = countOf Red
+      , green = countOf Green
+      , blue = countOf Blue
+      }
 
 parseGame :: Parser Game
 parseGame = do
   string' "Game "
-  gameId <- integer
+  gameId <- natural
   string' ": "
   pulls <- parsePull `sepBy` string' "; "
   pure $ Game {gameId, pulls}
 
-parser :: Parser [Game]
-parser = parseGame `sepEndBy` newline
+parseGames :: Parser [Game]
+parseGames = parseGame `sepEndBy` newline
 
-maxCubes :: PulledCubes
-maxCubes =
-  PulledCubes
+{--- PROCESSING ---}
+maxCubeCounts :: CubeCounts
+maxCubeCounts =
+  CubeCounts
     { red = 12
     , green = 13
     , blue = 14
     }
 
-isPullPossible :: PulledCubes -> Bool
+isPullPossible :: CubeCounts -> Bool
 isPullPossible pull =
   all isColourPossible [red, green, blue]
     where
-      isColourPossible :: (PulledCubes -> Integer) -> Bool
-      isColourPossible colour = colour pull <= colour maxCubes
+      isColourPossible :: (CubeCounts -> Count) -> Bool
+      isColourPossible colour = colour pull <= colour maxCubeCounts
 
 isGamePossible :: Game -> Bool
-isGamePossible game =
-  all isPullPossible (pulls game)
+isGamePossible Game {pulls} =
+  all isPullPossible pulls
 
-run :: String -> Integer
-run input =
-  let games =
-        case parse parser "huh" input of
-          Left err -> error $ show err
-          Right res -> res
-      possibleGames = filter isGamePossible games
+process :: [Game] -> Natural
+process games =
+  let possibleGames = filter isGamePossible games
       gameIds = gameId <$> possibleGames
    in sum gameIds
+
+{--- FAFF ---}
+parseOrCrash :: String -> [Game]
+parseOrCrash input =
+  case parse parseGames "" input of
+    Left err -> error (show err)
+    Right res -> res
 
 wrap :: Show a => (String -> a) -> (String -> String)
 wrap f input
   = show (f input) <> "\n"
 
 main :: IO ()
-main = interact (wrap run)
+main = interact $ wrap (process . parseOrCrash)
